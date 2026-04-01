@@ -2,7 +2,7 @@ name: Web News Push
 
 on:
   schedule:
-    - cron: '25 8 * * *'   # 每天下午4:15本地时间 (UTC+8)
+    - cron: '*/5 * * * *'  
   workflow_dispatch:        # 手动触发用
 
 jobs:
