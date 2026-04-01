@@ -2,7 +2,7 @@ name: Web News Push
 
 on:
   schedule:
-    - cron: '0 16 * * *'   # 每天 16:00（北京时间）
+    - cron: '0 8 * * *'   # 每天 16:00（北京时间）
   workflow_dispatch:
 
 jobs:
