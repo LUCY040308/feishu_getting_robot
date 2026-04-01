@@ -1,106 +1,135 @@
-import requests
-import os
+from __future__ import annotations
+
 import datetime
+import os
+from pathlib import Path
+
+import requests
 
 from scrapers.ai_bot import scrape_ai_bot
 from scrapers.aipulse import scrape_aipulse
+from scrapers.rss import scrape_rss
 
-# ======================
-# 🔧 配置区
-# ======================
-
-FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/ef3b9cf6-10d9-4169-8d7d-e31f1339f444"
-WEB_SOURCES_FILE = "web_sources.txt"
-HISTORY_FILE = "history.txt"
-
-DEBUG = True  # 👉 调试模式：每次都会发消息
-
-# ======================
-# 🧠 抓取器映射
-# ======================
+BASE_DIR = Path(__file__).resolve().parent
+FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "").strip()
+WEB_SOURCES_FILE = Path(os.getenv("WEB_SOURCES_FILE", str(BASE_DIR / "web_sources.txt")))
+HISTORY_FILE = Path(os.getenv("HISTORY_FILE", str(BASE_DIR / "history.txt")))
+DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+REQUEST_TIMEOUT = 20
 
 SCRAPER_MAP = {
     "ai_bot": scrape_ai_bot,
     "aipulse": scrape_aipulse,
+    "ai": scrape_rss,
+    "rss": scrape_rss,
 }
 
-# ======================
-# 📦 读取历史记录（去重）
-# ======================
 
-if os.path.exists(HISTORY_FILE):
-    with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-        history = set(line.strip() for line in f)
-else:
-    history = set()
+def load_history() -> set[str]:
+    if not HISTORY_FILE.exists():
+        return set()
 
-new_items = []
+    with HISTORY_FILE.open("r", encoding="utf-8") as history_file:
+        return {line.strip() for line in history_file if line.strip()}
 
-# ======================
-# 🌐 抓取网站
-# ======================
 
-with open(WEB_SOURCES_FILE, "r", encoding="utf-8") as f:
-    for line in f:
-        if not line.strip():
-            continue
+def save_history(history: set[str]) -> None:
+    HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-        try:
-            name, url = line.strip().split("|")
-        except ValueError:
-            print(f"格式错误: {line}")
-            continue
+    with HISTORY_FILE.open("w", encoding="utf-8") as history_file:
+        for entry in sorted(history):
+            history_file.write(entry + "\n")
 
+
+def load_sources():
+    with WEB_SOURCES_FILE.open("r", encoding="utf-8") as sources_file:
+        for raw_line in sources_file:
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            try:
+                name, url = line.split("|", 1)
+            except ValueError:
+                print(f"Format error: {raw_line.rstrip()}")
+                continue
+
+            yield name.strip(), url.strip()
+
+
+def collect_new_items(history: set[str]) -> list[str]:
+    new_items = []
+
+    for name, url in load_sources():
         scraper = SCRAPER_MAP.get(name)
-
-        if not scraper:
-            print(f"未找到抓取器: {name}")
+        if scraper is None:
+            print(f"Missing scraper: {name}")
             continue
 
         try:
             results = scraper(url)
-            for title, link in results:
-                entry_id = title + link
+        except Exception as exc:
+            print(f"{name} scrape failed: {exc}")
+            continue
 
-                if entry_id not in history:
-                    new_items.append(f"🌐 {title}\n{link}")
-                    history.add(entry_id)
+        for title, link in results:
+            entry_id = f"{title}|{link}"
+            if entry_id in history:
+                continue
 
-        except Exception as e:
-            print(f"{name} 抓取失败: {e}")
+            new_items.append(f"[{name}] {title}\n{link}")
+            history.add(entry_id)
 
-# ======================
-# 🧪 DEBUG 模式（强制发消息）
-# ======================
+    return new_items
 
-if DEBUG:
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    new_items.append(f"🧪 调试消息\n时间：{now}")
 
-# ======================
-# 📤 推送飞书
-# ======================
+def build_message(new_items: list[str]) -> str | None:
+    message_items = list(new_items)
 
-if new_items:
-    message = "🚀 AI网页情报更新\n\n" + "\n\n".join(new_items)
+    if DEBUG:
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        message_items.append(f"Debug message\nTime: {now}")
+
+    if not message_items:
+        return None
+
+    return "AI web updates\n\n" + "\n\n".join(message_items)
+
+
+def send_to_feishu(message: str) -> str:
+    if not FEISHU_WEBHOOK:
+        raise ValueError("FEISHU_WEBHOOK environment variable is not set.")
 
     data = {
         "msg_type": "text",
-        "content": {"text": message}
+        "content": {"text": message},
     }
 
-    try:
-        resp = requests.post(FEISHU_WEBHOOK, json=data)
-        print("飞书返回:", resp.text)
-    except Exception as e:
-        print("发送失败:", e)
-else:
-    print("没有新内容")
+    response = requests.post(FEISHU_WEBHOOK, json=data, timeout=REQUEST_TIMEOUT)
+    response.raise_for_status()
+    print("Feishu response:", response.text)
+    return response.text
 
-# ======================
-# 💾 保存历史记录
-# ======================
 
-with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-    for line in history:
-        f.write(line + "\n")
+def run_job() -> dict[str, int | bool]:
+    history = load_history()
+    new_items = collect_new_items(history)
+    message = build_message(new_items)
+
+    if not message:
+        print("No new content")
+        save_history(history)
+        return {"sent": False, "new_items": 0}
+
+    send_to_feishu(message)
+    save_history(history)
+    return {"sent": True, "new_items": len(new_items)}
+
+
+def main() -> None:
+    result = run_job()
+    print("Run result:", result)
+
+
+if __name__ == "__main__":
+    main()
