@@ -1,2 +1,4 @@
 ai_bot|https://ai-bot.cn/daily-ai-news/
 aipulse|https://www.aipulse.run/
+ai|https://hnrss.org/newcomments
+
