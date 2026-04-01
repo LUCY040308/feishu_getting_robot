@@ -2,19 +2,22 @@ name: Web News Push
 
 on:
   schedule:
-    - cron: '15 8 * * *'   # 每天 16:00（北京时间）
-  workflow_dispatch:
+    - cron: '25 8 * * *'   # 每天下午4:15本地时间 (UTC+8)
+  workflow_dispatch:        # 手动触发用
 
 jobs:
-  run-bot:
+  push-news:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Setup Python
+
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
-      - name: Install deps
+
+      - name: Install dependencies
         run: pip install requests beautifulsoup4
-      - name: Run script
+
+      - name: Run main.py
         run: python main.py
