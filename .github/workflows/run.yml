@@ -1,0 +1,20 @@
+name: Web News Push
+
+on:
+  schedule:
+    - cron: '0 16 * * *'   # 每天 16:00（北京时间）
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+      - name: Install deps
+        run: pip install requests beautifulsoup4
+      - name: Run script
+        run: python main.py
